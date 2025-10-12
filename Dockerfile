@@ -12,8 +12,8 @@ RUN apt-get update && apt-get install -y \
     g++ \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy package files and npm configuration
-COPY package*.json .npmrc ./
+# Copy package files and lockfile
+COPY package.json package-lock.json ./
 
 # Configure npm for better reliability
 RUN npm config set fetch-retry-mintimeout 20000 && \
@@ -40,7 +40,7 @@ RUN npm run build
 FROM node:20-bookworm-slim AS runner
 WORKDIR /app
 
-# Install Playwright system dependencies for Chromium (Debian 12)
+# Install Playwright system dependencies for Chromium (Debian 12) and su-exec
 RUN apt-get update && apt-get install -y \
     libnss3 \
     libnspr4 \
@@ -62,6 +62,7 @@ RUN apt-get update && apt-get install -y \
     python3 \
     make \
     g++ \
+    su-exec \
     && rm -rf /var/lib/apt/lists/*
 
 # Playwright wird die Browser selbst installieren - kein Skip
@@ -76,12 +77,14 @@ RUN addgroup --system --gid 1001 nodejs && \
     adduser --system --uid 1001 nextjs
 
 # Copy necessary files from builder
-COPY --from=builder /app/public ./public
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/scrapers ./scrapers
 COPY --from=builder /app/lib ./lib
+
+# Create public directory (Next.js may need it even if empty)
+RUN mkdir -p /app/public
 
 # Create data directory for SQLite database and fontconfig cache
 RUN mkdir -p /app/data /app/.cache/fontconfig && \
@@ -95,8 +98,9 @@ RUN npx playwright install chromium
 ENV FONTCONFIG_PATH=/app/.cache/fontconfig
 ENV XDG_CACHE_HOME=/app/.cache
 
-# Switch to non-root user
-USER nextjs
+# Copy entrypoint script
+COPY docker-entrypoint.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
 # Expose port
 EXPOSE 3000
@@ -104,6 +108,9 @@ EXPOSE 3000
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
   CMD node -e "require('http').get('http://localhost:3000/api/stats', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"
+
+# Use entrypoint to set permissions and switch to nextjs user
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 
 # Start application
 CMD ["node", "server.js"]
