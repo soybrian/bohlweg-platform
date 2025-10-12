@@ -40,7 +40,7 @@ RUN npm run build
 FROM node:20-bookworm-slim AS runner
 WORKDIR /app
 
-# Install Playwright system dependencies for Chromium (Debian 12) and su-exec
+# Install Playwright system dependencies for Chromium (Debian 12) and gosu
 RUN apt-get update && apt-get install -y \
     libnss3 \
     libnspr4 \
@@ -62,7 +62,7 @@ RUN apt-get update && apt-get install -y \
     python3 \
     make \
     g++ \
-    su-exec \
+    gosu \
     && rm -rf /var/lib/apt/lists/*
 
 # Playwright wird die Browser selbst installieren - kein Skip
