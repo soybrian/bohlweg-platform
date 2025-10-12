@@ -1,0 +1,59 @@
+version: '3.8'
+
+services:
+  # Bohlweg Platform - Web Application
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: bohlweg-web
+    ports:
+      - "3000:3000"
+    volumes:
+      # Persistent database storage
+      - ./data:/app/data
+    environment:
+      - NODE_ENV=production
+      - NEXT_TELEMETRY_DISABLED=1
+      - PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+    restart: unless-stopped
+    networks:
+      - bohlweg-network
+    # Shared memory für Playwright (headless browser braucht ausreichend RAM)
+    shm_size: '2gb'
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/api/stats', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Bohlweg Scraper - Scheduled Tasks
+  scraper:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: bohlweg-scraper
+    volumes:
+      # Share database with web service
+      - ./data:/app/data
+    environment:
+      - NODE_ENV=production
+      - PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+    # Shared memory für Playwright (headless browser braucht ausreichend RAM)
+    shm_size: '2gb'
+    command: ["node", "-r", "ts-node/register", "scrapers/scheduler.ts"]
+    restart: unless-stopped
+    networks:
+      - bohlweg-network
+    depends_on:
+      web:
+        condition: service_healthy
+
+networks:
+  bohlweg-network:
+    driver: bridge
+
+volumes:
+  data:
+    driver: local
