@@ -7,7 +7,7 @@
 import Database from "better-sqlite3";
 import path from "path";
 import fs from "fs";
-import { DB_SCHEMA, Idea, Maengel, ScraperRun, IdeaHistory, MaengelHistory, ModuleConfig, PlatformSummary } from "./schema";
+import { DB_SCHEMA, Idea, Maengel, ScraperRun, IdeaHistory, MaengelHistory, ModuleConfig, PlatformSummary, EventItem } from "./schema";
 
 const DB_PATH = path.join(process.cwd(), "data", "bohlweg.db");
 
@@ -795,4 +795,114 @@ export function getAllCurrentSummaries(): PlatformSummary[] {
   if (maengelSummary) summaries.push(maengelSummary);
 
   return summaries;
+}
+
+// ===== EVENT OPERATIONS =====
+
+export function upsertEvent(event: Omit<EventItem, "id">, eventDates?: Array<{ date: string; startTime?: string; endTime?: string }>): { isNew: boolean; id: number; hasChanged: boolean } {
+  const db = getDatabase();
+
+  const existing = db
+    .prepare("SELECT * FROM events WHERE externalId = ?")
+    .get(event.externalId) as EventItem | undefined;
+
+  let eventId: number;
+
+  if (existing) {
+    const hasChanged = (
+      existing.title !== event.title ||
+      existing.description !== event.description ||
+      existing.startDate !== event.startDate ||
+      existing.status !== event.status
+    );
+
+    if (hasChanged) {
+      db.prepare(`
+        UPDATE events SET
+          title = ?, description = ?, shortDescription = ?,
+          startDate = ?, endDate = ?, startTime = ?, endTime = ?,
+          venueName = ?, venueAddress = ?, venuePostcode = ?, venueCity = ?,
+          organizer = ?, imageUrl = ?, category = ?, categories = ?,
+          price = ?, isFree = ?, url = ?, status = ?,
+          scraped_at = ?, modified_at = ?,
+          detailScraped = ?, detailScrapedAt = ?
+        WHERE id = ?
+      `).run(
+        event.title, event.description || null, event.shortDescription || null,
+        event.startDate || null, event.endDate || null, event.startTime || null, event.endTime || null,
+        event.venueName || null, event.venueAddress || null, event.venuePostcode || null, event.venueCity || 'Braunschweig',
+        event.organizer || null, event.imageUrl || null, event.category || null, event.categories || null,
+        event.price || null, event.isFree ? 1 : 0, event.url, event.status || 'active',
+        event.scraped_at, new Date().toISOString(),
+        event.detailScraped ? 1 : 0, event.detailScrapedAt || null,
+        existing.id
+      );
+    }
+
+    eventId = existing.id;
+
+    // Update event_dates if provided
+    if (eventDates && eventDates.length > 0) {
+      // Delete old dates
+      db.prepare('DELETE FROM event_dates WHERE event_id = ?').run(eventId);
+      // Insert new dates
+      const insertStmt = db.prepare(`
+        INSERT INTO event_dates (event_id, externalId, date, startTime, endTime, created_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `);
+      for (const eventDate of eventDates) {
+        insertStmt.run(
+          eventId,
+          event.externalId,
+          eventDate.date,
+          eventDate.startTime || null,
+          eventDate.endTime || null,
+          new Date().toISOString()
+        );
+      }
+    }
+
+    return { isNew: false, id: existing.id, hasChanged };
+  } else {
+    const result = db.prepare(`
+      INSERT INTO events (
+        externalId, title, description, shortDescription,
+        startDate, endDate, startTime, endTime,
+        venueName, venueAddress, venuePostcode, venueCity,
+        organizer, imageUrl, category, categories,
+        price, isFree, url, status, scraped_at,
+        detailScraped, detailScrapedAt
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      event.externalId, event.title, event.description || null, event.shortDescription || null,
+      event.startDate || null, event.endDate || null, event.startTime || null, event.endTime || null,
+      event.venueName || null, event.venueAddress || null, event.venuePostcode || null, event.venueCity || 'Braunschweig',
+      event.organizer || null, event.imageUrl || null, event.category || null, event.categories || null,
+      event.price || null, event.isFree ? 1 : 0, event.url, event.status || 'active', event.scraped_at,
+      event.detailScraped ? 1 : 0, event.detailScrapedAt || null
+    );
+
+    eventId = result.lastInsertRowid as number;
+
+    // Insert event_dates if provided
+    if (eventDates && eventDates.length > 0) {
+      const insertStmt = db.prepare(`
+        INSERT INTO event_dates (event_id, externalId, date, startTime, endTime, created_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `);
+      for (const eventDate of eventDates) {
+        insertStmt.run(
+          eventId,
+          event.externalId,
+          eventDate.date,
+          eventDate.startTime || null,
+          eventDate.endTime || null,
+          new Date().toISOString()
+        );
+      }
+    }
+
+    return { isNew: true, id: eventId, hasChanged: false };
+  }
 }

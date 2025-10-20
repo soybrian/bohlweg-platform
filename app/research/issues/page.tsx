@@ -6,6 +6,7 @@ import { cn, formatRelativeTime } from "@/lib/utils";
 import { PlatformSummary } from "@/app/components/PlatformSummary";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { maengelQuickActions } from "@/lib/quick-actions";
 
 interface Maengel {
   id: number;
@@ -80,13 +81,6 @@ export default function MaengelPage() {
   const answerContainerRef = useRef<HTMLDivElement | null>(null);
   const customInputRef = useRef<HTMLInputElement | null>(null);
 
-  // Quick action buttons
-  const quickActions = [
-    { label: "Zusammenfassung erstellen", question: "Erstelle eine kurze Übersicht: Welche Probleme und Mängel beschäftigen die Bürger aktuell? Was sind die Hauptanliegen? Gib mir einen kompakten Überblick ohne Details zu einzelnen Meldungen." },
-    { label: "Häufigste Kategorien", question: "Was sind die häufigsten Kategorien?" },
-    { label: "Status-Übersicht", question: "Gib mir eine Übersicht über die verschiedenen Status der Mängel." },
-    { label: "Dringende Mängel", question: "Welche Mängel sollten prioritär bearbeitet werden?" },
-  ];
   const ITEMS_TO_DISPLAY = 10;
   const ITEMS_TO_FETCH = 20;
   const MAX_BUFFER_SIZE = 100;
@@ -443,7 +437,7 @@ export default function MaengelPage() {
                   >
                     <div className="overflow-hidden">
                       <div className="flex flex-wrap gap-1.5">
-                        {quickActions.map((action) => (
+                        {maengelQuickActions.map((action) => (
                           <button
                             key={action.label}
                             onClick={() => streamAnswer(action.question)}

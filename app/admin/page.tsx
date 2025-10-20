@@ -35,7 +35,10 @@ export default function AdminPage() {
   const [running, setRunning] = useState<string | null>(null);
   const [runResult, setRunResult] = useState<{ moduleKey: string; success: boolean; message: string } | null>(null);
   const [progress, setProgress] = useState<Map<string, ProgressState>>(new Map());
-  const [rescraping, setRescraping] = useState(false);
+  const [rescrapingIdeas, setRescrapingIdeas] = useState(false);
+  const [rescrapingEvents, setRescrapingEvents] = useState(false);
+  const [showEventsModal, setShowEventsModal] = useState(false);
+  const [showIdeasModal, setShowIdeasModal] = useState(false);
 
   useEffect(() => {
     loadModules();
@@ -110,7 +113,7 @@ export default function AdminPage() {
 
     if (!confirmed) return;
 
-    setRescraping(true);
+    setRescrapingIdeas(true);
     try {
       const res = await fetch("/api/ideas/reset-and-scrape", {
         method: "POST",
@@ -132,7 +135,38 @@ export default function AdminPage() {
       console.error("Error in reset and scrape:", error);
       alert("Fehler beim Scraping");
     } finally {
-      setRescraping(false);
+      setRescrapingIdeas(false);
+    }
+  };
+
+  const confirmAndScrapeEvents = async () => {
+    setShowEventsModal(false);
+    setRescrapingEvents(true);
+
+    try {
+      const res = await fetch("/api/events/reset-and-scrape", {
+        method: "POST",
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        alert(
+          `✓ Erfolgreich abgeschlossen!\n\n` +
+            `Gescraped: ${data.itemsScraped} Events\n` +
+            `Neu: ${data.itemsNew}\n` +
+            `Aktualisiert: ${data.itemsUpdated}\n\n` +
+            `Alle Events wurden mit AI-Extraktion gescraped.`
+        );
+        loadModules();
+      } else {
+        const data = await res.json();
+        alert(`Fehler beim Scraping: ${data.error || "Unbekannter Fehler"}`);
+      }
+    } catch (error) {
+      console.error("Error in reset and scrape events:", error);
+      alert("Fehler beim Scraping");
+    } finally {
+      setRescrapingEvents(false);
     }
   };
 
@@ -251,8 +285,8 @@ export default function AdminPage() {
       </nav>
 
       <div className="px-4 md:px-6">
-        {/* Reset and Scrape Control */}
-        <div className="glass-card border border-red-500/20 mb-4">
+        {/* Reset and Scrape Control - Ideen */}
+        <div className="glass-card border border-red-500/20 mb-3">
           <div className="flex items-start justify-between gap-4">
             <div>
               <h2 className="text-sm font-semibold text-white mb-1 flex items-center gap-2">
@@ -267,10 +301,46 @@ export default function AdminPage() {
             </div>
             <button
               onClick={resetAndScrape}
-              disabled={rescraping}
+              disabled={rescrapingIdeas}
               className="px-4 py-2 bg-red-500/20 hover:bg-red-500/30 border border-red-500/30 rounded-lg text-sm text-red-300 font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 flex-shrink-0"
             >
-              {rescraping ? (
+              {rescrapingIdeas ? (
+                <>
+                  <Loader2 size={16} className="animate-spin" />
+                  Scraping...
+                </>
+              ) : (
+                <>
+                  <RefreshCw size={16} />
+                  Neu scrapen
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+
+        {/* Reset and Scrape Control - Events */}
+        <div className="glass-card border border-blue-500/20 mb-4">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h2 className="text-sm font-semibold text-white mb-1 flex items-center gap-2">
+                <RefreshCw size={16} className="text-blue-400" />
+                Events komplett neu scrapen
+              </h2>
+              <p className="text-xs text-white/60">
+                Löscht alle bestehenden Events und scraped alle ~450 Events komplett neu mit GPT-4o-mini AI-Extraktion für maximale Datenqualität.
+                <br />
+                <span className="text-blue-300/80">⏱️ Dauert ca. 10-15 Minuten</span>
+                {" · "}
+                <span className="text-red-300/80">⚠️ Destruktive Operation!</span>
+              </p>
+            </div>
+            <button
+              onClick={() => setShowEventsModal(true)}
+              disabled={rescrapingEvents}
+              className="px-4 py-2 bg-blue-500/20 hover:bg-blue-500/30 border border-blue-500/30 rounded-lg text-sm text-blue-300 font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 flex-shrink-0"
+            >
+              {rescrapingEvents ? (
                 <>
                   <Loader2 size={16} className="animate-spin" />
                   Scraping...
@@ -460,6 +530,85 @@ export default function AdminPage() {
           )}
         </div>
       </div>
+
+      {/* Events Scraping Modal */}
+      {showEventsModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-in fade-in duration-200"
+          onClick={() => setShowEventsModal(false)}
+        >
+          <div
+            className="glass-card border border-blue-500/30 max-w-md w-full animate-in zoom-in-95 duration-200"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start gap-3 mb-4">
+              <div className="p-2 bg-blue-500/20 border border-blue-500/30 rounded-lg">
+                <RefreshCw size={20} className="text-blue-400" />
+              </div>
+              <div className="flex-1">
+                <h3 className="text-base font-semibold text-white mb-1">
+                  Events komplett neu scrapen?
+                </h3>
+                <p className="text-xs text-white/60">
+                  Diese Aktion wird alle bestehenden Events löschen
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-3 mb-4">
+              <div className="glass-card bg-blue-500/5 border border-blue-500/20">
+                <h4 className="text-xs font-semibold text-white/80 mb-2">Was passiert:</h4>
+                <ul className="space-y-1.5 text-xs text-white/60">
+                  <li className="flex items-start gap-2">
+                    <span className="text-blue-400 mt-0.5">•</span>
+                    <span>Alle bestehenden Events werden gelöscht</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <span className="text-blue-400 mt-0.5">•</span>
+                    <span>~450 Events werden neu gescraped</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <span className="text-blue-400 mt-0.5">•</span>
+                    <span>GPT-4o-mini extrahiert alle Daten automatisch</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <span className="text-blue-400 mt-0.5">•</span>
+                    <span>Dauer: ca. 10-15 Minuten</span>
+                  </li>
+                </ul>
+              </div>
+
+              <div className="glass-card bg-red-500/5 border border-red-500/20">
+                <div className="flex items-start gap-2">
+                  <span className="text-red-400 text-lg">⚠️</span>
+                  <div>
+                    <h4 className="text-xs font-semibold text-red-300 mb-1">Destruktive Operation</h4>
+                    <p className="text-xs text-white/60">
+                      Diese Aktion kann nicht rückgängig gemacht werden.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex gap-2">
+              <button
+                onClick={() => setShowEventsModal(false)}
+                className="flex-1 px-4 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-sm text-white/70 font-medium transition-all"
+              >
+                Abbrechen
+              </button>
+              <button
+                onClick={confirmAndScrapeEvents}
+                className="flex-1 px-4 py-2 bg-blue-500/20 hover:bg-blue-500/30 border border-blue-500/30 rounded-lg text-sm text-blue-300 font-medium transition-all flex items-center justify-center gap-2"
+              >
+                <RefreshCw size={14} />
+                Jetzt scrapen
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

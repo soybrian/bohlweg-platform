@@ -12,10 +12,14 @@ services:
     volumes:
       # Persistent database storage
       - ./data:/app/data
+      # Timezone configuration
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
     environment:
       - NODE_ENV=production
       - NEXT_TELEMETRY_DISABLED=1
       - PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+      - TZ=Europe/Berlin
     restart: unless-stopped
     networks:
       - bohlweg-network
@@ -37,12 +41,18 @@ services:
     volumes:
       # Share database with web service
       - ./data:/app/data
+      # Timezone configuration
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
     environment:
       - NODE_ENV=production
       - PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+      - TZ=Europe/Berlin
+      - FONTCONFIG_PATH=/app/.cache/fontconfig
+      - XDG_CACHE_HOME=/app/.cache
     # Shared memory für Playwright (headless browser braucht ausreichend RAM)
     shm_size: '2gb'
-    command: ["node", "-r", "ts-node/register", "scrapers/scheduler.ts"]
+    command: ["node", "scrapers/scheduler-wrapper.js"]
     restart: unless-stopped
     networks:
       - bohlweg-network

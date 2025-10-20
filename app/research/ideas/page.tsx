@@ -5,6 +5,7 @@ import { Search, Menu, X, Filter, MessageCircle, Sparkles } from "lucide-react";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { ideenQuickActions } from "@/lib/quick-actions";
 
 interface Idea {
   id: number;
@@ -70,14 +71,6 @@ export default function IdeenPage() {
   const [showCustomInput, setShowCustomInput] = useState(false);
   const answerContainerRef = useRef<HTMLDivElement | null>(null);
   const customInputRef = useRef<HTMLInputElement | null>(null);
-
-  // Quick action buttons
-  const quickActions = [
-    { label: "Zusammenfassung erstellen", question: "Erstelle eine kurze Übersicht: Was bewegt die Bürger gerade? Welche Themen und Anliegen stehen im Vordergrund? Gib mir einen kompakten Überblick ohne Details zu einzelnen Ideen." },
-    { label: "Häufigste Kategorien", question: "Was sind die häufigsten Kategorien?" },
-    { label: "Top Themen", question: "Welche Themen werden am meisten diskutiert?" },
-    { label: "Status-Übersicht", question: "Gib mir eine Übersicht über die verschiedenen Status der Ideen." },
-  ];
 
   // Search Input
   const [showSearchInput, setShowSearchInput] = useState(false);
@@ -534,7 +527,7 @@ export default function IdeenPage() {
                   >
                     <div className="overflow-hidden">
                       <div className="flex flex-wrap gap-1.5">
-                        {quickActions.map((action) => (
+                        {ideenQuickActions.map((action) => (
                           <button
                             key={action.label}
                             onClick={() => streamAnswer(action.question)}

@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { getIdeas, getMaengel } from "@/lib/db";
+import { getIdeas, getMaengel, getDatabase } from "@/lib/db";
 import OpenAI from "openai";
 
 const openai = new OpenAI({
@@ -17,15 +17,15 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    if (!["ideas", "maengel"].includes(itemType)) {
+    if (!["ideas", "maengel", "events"].includes(itemType)) {
       return new Response(
-        JSON.stringify({ error: "itemType must be 'ideas' or 'maengel'" }),
+        JSON.stringify({ error: "itemType must be 'ideas', 'maengel', or 'events'" }),
         { status: 400, headers: { "Content-Type": "application/json" } }
       );
     }
 
     // Fetch relevant items based on type
-    let items: Array<{ title: string; description: string; category: string; status: string }> = [];
+    let items: Array<{ title: string; description: string; category?: string; status?: string; startDate?: string; startTime?: string; venueName?: string; organizer?: string; price?: string; isFree?: boolean | number }> = [];
 
     if (itemType === "ideas") {
       const ideas = getIdeas({
@@ -52,6 +52,34 @@ export async function POST(req: NextRequest) {
         category: mangel.category,
         status: mangel.status,
       }));
+    } else if (itemType === "events") {
+      // Fetch all events for the next 6 weeks
+      const db = getDatabase();
+      const sixWeeksFromNow = new Date();
+      sixWeeksFromNow.setDate(sixWeeksFromNow.getDate() + 42); // 6 weeks = 42 days
+      const endDateStr = sixWeeksFromNow.toISOString().split('T')[0];
+
+      const eventsQuery = `
+        SELECT * FROM events
+        WHERE startDate IS NOT NULL
+        AND startDate >= date('now')
+        AND startDate <= ?
+        ORDER BY startDate ASC, startTime ASC
+      `;
+
+      const events = db.prepare(eventsQuery).all(endDateStr) as any[];
+
+      items = events.map((event) => ({
+        title: event.title,
+        description: event.description || "",
+        category: event.category,
+        startDate: event.startDate,
+        startTime: event.startTime,
+        venueName: event.venueName,
+        organizer: event.organizer,
+        price: event.price,
+        isFree: event.isFree,
+      }));
     }
 
     if (items.length === 0) {
@@ -62,17 +90,54 @@ export async function POST(req: NextRequest) {
     }
 
     // Prepare context for OpenAI
-    const itemLabel = itemType === "ideas" ? "Bürgerideen" : "Mängelmeldungen";
-    const contextLimit = 10;
-    const contextItems = items.slice(0, contextLimit);
+    let itemLabel = "";
+    let context = "";
+    let systemPrompt = "";
 
-    const context = contextItems
-      .map((item, i) => `${i + 1}. Titel: ${item.title}\n   Kategorie: ${item.category}\n   Status: ${item.status}\n   Beschreibung: ${item.description}`)
-      .join("\n\n");
+    if (itemType === "ideas") {
+      itemLabel = "Bürgerideen";
+      const contextLimit = 10;
+      const contextItems = items.slice(0, contextLimit);
+
+      context = contextItems
+        .map((item, i) => `${i + 1}. Titel: ${item.title}\n   Kategorie: ${item.category}\n   Status: ${item.status}\n   Beschreibung: ${item.description}`)
+        .join("\n\n");
+
+      systemPrompt = `Du bist ein hilfreicher Assistent für die Stadt Braunschweig, der Fragen über ${itemLabel} beantwortet.`;
+    } else if (itemType === "maengel") {
+      itemLabel = "Mängelmeldungen";
+      const contextLimit = 10;
+      const contextItems = items.slice(0, contextLimit);
+
+      context = contextItems
+        .map((item, i) => `${i + 1}. Titel: ${item.title}\n   Kategorie: ${item.category}\n   Status: ${item.status}\n   Beschreibung: ${item.description}`)
+        .join("\n\n");
+
+      systemPrompt = `Du bist ein hilfreicher Assistent für die Stadt Braunschweig, der Fragen über ${itemLabel} beantwortet.`;
+    } else if (itemType === "events") {
+      itemLabel = "Veranstaltungen";
+
+      // For events, include ALL items (no limit) since we want full 6 weeks coverage
+      context = items
+        .map((item, i) => {
+          const parts = [
+            `${i + 1}. Titel: ${item.title}`,
+            item.startDate && `   Datum: ${item.startDate}${item.startTime ? ` um ${item.startTime} Uhr` : ''}`,
+            item.venueName && `   Ort: ${item.venueName}`,
+            item.organizer && `   Veranstalter: ${item.organizer}`,
+            item.isFree === true || item.isFree === 1 ? '   Preis: Kostenlos' : item.price && `   Preis: ${item.price}`,
+            item.description && `   Beschreibung: ${item.description}`,
+          ];
+          return parts.filter(Boolean).join('\n');
+        })
+        .join("\n\n");
+
+      systemPrompt = `Du bist ein hilfreicher Assistent für Braunschweig, der Fragen über Veranstaltungen beantwortet. Du hast Zugriff auf alle Events der nächsten 6 Wochen.`;
+    }
 
     const prompt = `Du bist ein hilfreicher Assistent, der Fragen über ${itemLabel} aus Braunschweig beantwortet.
 
-Kontext - Aktuelle ${itemLabel} (${contextItems.length} von ${items.length} insgesamt):
+Kontext - Aktuelle ${itemLabel} (${items.length} insgesamt):
 
 ${context}
 
@@ -86,7 +151,7 @@ Beantworte die Frage basierend auf den bereitgestellten ${itemLabel}. Sei präzi
       messages: [
         {
           role: "system",
-          content: `Du bist ein hilfreicher Assistent für die Stadt Braunschweig, der Fragen über ${itemLabel} beantwortet.`,
+          content: systemPrompt,
         },
         {
           role: "user",

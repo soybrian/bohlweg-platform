@@ -12,6 +12,7 @@
 import cron from "node-cron";
 import { scrapeIdeenplattform } from "./ideenplattform";
 import { scrapeMaengelmelder } from "./maengelmelder";
+import { scrapeEventsBraunschweig } from "./events-braunschweig";
 
 // Konfiguration
 const CONFIG = {
@@ -23,6 +24,11 @@ const CONFIG = {
   maengelmelder: {
     schedule: "30 6 * * *", // Täglich um 6:30 Uhr
     maxPages: 5,
+    enabled: true,
+  },
+  "events-braunschweig": {
+    schedule: "0 7 * * *", // Täglich um 7:00 Uhr
+    maxEvents: undefined, // Alle Events
     enabled: true,
   },
 };
@@ -76,6 +82,19 @@ export function startScheduler() {
     });
   }
 
+  // Events Braunschweig Schedule
+  if (CONFIG["events-braunschweig"].enabled) {
+    console.log(
+      `[Scheduler] Events-Scraper geplant: ${CONFIG["events-braunschweig"].schedule}`
+    );
+
+    cron.schedule(CONFIG["events-braunschweig"].schedule, () => {
+      safeScrape("Events Braunschweig", () =>
+        scrapeEventsBraunschweig(CONFIG["events-braunschweig"].maxEvents)
+      );
+    });
+  }
+
   console.log("\n[Scheduler] Scheduler erfolgreich gestartet!");
   console.log("[Scheduler] Drücke Ctrl+C zum Beenden.\n");
 }
@@ -95,6 +114,12 @@ export async function runAllScrapersNow() {
   if (CONFIG.maengelmelder.enabled) {
     await safeScrape("Mängelmelder", () =>
       scrapeMaengelmelder(true, CONFIG.maengelmelder.maxPages)
+    );
+  }
+
+  if (CONFIG["events-braunschweig"].enabled) {
+    await safeScrape("Events Braunschweig", () =>
+      scrapeEventsBraunschweig(CONFIG["events-braunschweig"].maxEvents)
     );
   }
 
@@ -133,6 +158,19 @@ if (require.main === module) {
     // Führe nur Mängelmelder aus
     safeScrape("Mängelmelder", () =>
       scrapeMaengelmelder(true, CONFIG.maengelmelder.maxPages)
+    )
+      .then(() => {
+        console.log("\n[Scheduler] Scraping abgeschlossen. Beende...");
+        process.exit(0);
+      })
+      .catch((error) => {
+        console.error("\n[Scheduler] Fehler beim Scraping:", error);
+        process.exit(1);
+      });
+  } else if (args.includes("--events") || args.includes("-e")) {
+    // Führe nur Events-Scraper aus
+    safeScrape("Events Braunschweig", () =>
+      scrapeEventsBraunschweig(CONFIG["events-braunschweig"].maxEvents)
     )
       .then(() => {
         console.log("\n[Scheduler] Scraping abgeschlossen. Beende...");

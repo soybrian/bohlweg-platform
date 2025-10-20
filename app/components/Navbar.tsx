@@ -164,18 +164,19 @@ export default function Navbar() {
                 Events
               </div>
               <div className="space-y-2">
-                <div
+                <a
+                  href="/events"
                   className={cn(
-                    "flex items-center gap-3 px-6 py-4 rounded-xl text-white/30 bg-white/5 transition-all duration-300 backdrop-blur-sm border border-white/10 cursor-not-allowed",
+                    "flex items-center gap-3 px-6 py-4 rounded-xl text-white/80 hover:text-white bg-white/5 hover:bg-white/10 transition-all duration-300 backdrop-blur-sm border border-white/10",
                     "transform transition-all duration-500 ease-out",
                     isOpen ? "translate-x-0 opacity-100" : "-translate-x-8 opacity-0"
                   )}
                   style={{ transitionDelay: isOpen ? "400ms" : "0ms" }}
+                  onClick={() => setIsOpen(false)}
                 >
                   <Calendar className="h-5 w-5" />
                   <span className="text-base font-medium">Veranstaltungen</span>
-                  <span className="ml-auto text-[10px] px-2 py-0.5 bg-white/10 rounded">Bald</span>
-                </div>
+                </a>
               </div>
             </div>
 

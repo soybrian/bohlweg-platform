@@ -36,6 +36,9 @@ COPY . .
 # Build Next.js application
 RUN npm run build
 
+# Compile TypeScript files for scrapers
+RUN npx tsc --project tsconfig.scrapers.json || true
+
 # Stage 2: Runner
 FROM node:20-bookworm-slim AS runner
 WORKDIR /app
@@ -82,6 +85,7 @@ COPY --from=builder /app/.next/static ./.next/static
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/scrapers ./scrapers
 COPY --from=builder /app/lib ./lib
+COPY --from=builder /app/dist ./dist
 
 # Create public directory (Next.js may need it even if empty)
 RUN mkdir -p /app/public

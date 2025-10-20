@@ -121,6 +121,46 @@ export interface PlatformSummary {
   validUntil?: string; // Summary valid until next scraping
 }
 
+export interface EventItem {
+  id: number;
+  externalId: string;
+  title: string;
+  description?: string;
+  shortDescription?: string;
+  startDate?: string;
+  endDate?: string;
+  startTime?: string;
+  endTime?: string;
+  venueName?: string;
+  venueAddress?: string;
+  venuePostcode?: string;
+  venueCity?: string;
+  organizer?: string;
+  imageUrl?: string;
+  category?: string;
+  categories?: string; // JSON array
+  moodCategory?: string; // "Das crazy" | "Lustig" | "Interessant" | "Kann man sich geben"
+  price?: string;
+  isFree?: boolean;
+  ticketUrl?: string; // URL to buy tickets
+  url: string;
+  status?: string;
+  scraped_at: string;
+  modified_at?: string;
+  detailScraped?: boolean;
+  detailScrapedAt?: string;
+}
+
+export interface EventDate {
+  id: number;
+  event_id: number;
+  externalId: string; // Same as parent event
+  date: string; // ISO format: YYYY-MM-DD
+  startTime?: string; // HH:MM
+  endTime?: string; // HH:MM
+  created_at: string;
+}
+
 export const DB_SCHEMA = `
 -- Ideen von der Ideenplattform
 CREATE TABLE IF NOT EXISTS ideas (
@@ -271,4 +311,58 @@ CREATE TABLE IF NOT EXISTS platform_summaries (
 
 CREATE INDEX IF NOT EXISTS idx_platform_summaries_moduleKey ON platform_summaries(moduleKey);
 CREATE INDEX IF NOT EXISTS idx_platform_summaries_createdAt ON platform_summaries(createdAt);
+
+-- Events von braunschweig.die-region.de
+CREATE TABLE IF NOT EXISTS events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  externalId TEXT UNIQUE NOT NULL,
+  title TEXT NOT NULL,
+  description TEXT,
+  shortDescription TEXT,
+  startDate TEXT,
+  endDate TEXT,
+  startTime TEXT,
+  endTime TEXT,
+  venueName TEXT,
+  venueAddress TEXT,
+  venuePostcode TEXT,
+  venueCity TEXT DEFAULT 'Braunschweig',
+  organizer TEXT,
+  imageUrl TEXT,
+  category TEXT,
+  categories TEXT,
+  moodCategory TEXT,
+  price TEXT,
+  isFree BOOLEAN DEFAULT 0,
+  ticketUrl TEXT,
+  url TEXT NOT NULL,
+  status TEXT DEFAULT 'active',
+  scraped_at TEXT NOT NULL,
+  modified_at TEXT,
+  detailScraped BOOLEAN DEFAULT 0,
+  detailScrapedAt TEXT,
+  UNIQUE(externalId)
+);
+
+CREATE INDEX IF NOT EXISTS idx_events_startDate ON events(startDate);
+CREATE INDEX IF NOT EXISTS idx_events_category ON events(category);
+CREATE INDEX IF NOT EXISTS idx_events_city ON events(venueCity);
+CREATE INDEX IF NOT EXISTS idx_events_scraped_at ON events(scraped_at);
+CREATE INDEX IF NOT EXISTS idx_events_status ON events(status);
+
+-- Event Dates (Multiple dates for recurring events)
+CREATE TABLE IF NOT EXISTS event_dates (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  event_id INTEGER NOT NULL,
+  externalId TEXT NOT NULL,
+  date TEXT NOT NULL,
+  startTime TEXT,
+  endTime TEXT,
+  created_at TEXT NOT NULL,
+  FOREIGN KEY(event_id) REFERENCES events(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_event_dates_event_id ON event_dates(event_id);
+CREATE INDEX IF NOT EXISTS idx_event_dates_externalId ON event_dates(externalId);
+CREATE INDEX IF NOT EXISTS idx_event_dates_date ON event_dates(date);
 `;

@@ -81,8 +81,12 @@ async function scrapeIdeaDetail(browser: Browser, url: string, retries: number =
     await detailPage.goto(url, { waitUntil: "domcontentloaded", timeout: 15000 });
     await detailPage.waitForSelector("h1", { timeout: 5000 });
 
-    // Vollständige Beschreibung extrahieren - alle relevanten Container sammeln
-    const fullDescription = await detailPage.evaluate(() => {
+    // Vollständiger Titel und Beschreibung von der Detailseite extrahieren
+    const detailPageContent = await detailPage.evaluate(() => {
+      // Extrahiere den vollständigen Titel von der Detailseite
+      const h1Element = document.querySelector('h1');
+      const fullTitle = h1Element?.textContent?.trim() || '';
+
       const descriptionParts: string[] = [];
 
       // Suche nach verschiedenen möglichen Container-Klassen
@@ -106,7 +110,10 @@ async function scrapeIdeaDetail(browser: Browser, url: string, retries: number =
         }
       }
 
-      return descriptionParts.join('\n\n');
+      return {
+        fullTitle,
+        fullDescription: descriptionParts.join('\n\n')
+      };
     });
 
     // Extrahiere alle Daten von der Detailseite
@@ -189,7 +196,8 @@ async function scrapeIdeaDetail(browser: Browser, url: string, retries: number =
       await context.close();
 
       return {
-        description: fullDescription,
+        title: detailPageContent.fullTitle || undefined,
+        description: detailPageContent.fullDescription,
         votingDeadline: votingInfo.deadline || undefined,
         votingExpired: votingInfo.expired,
         supportersList: detailData.supportersList.length > 0
@@ -330,12 +338,19 @@ async function extractIdeasFromPage(page: Page, browser: Browser, scrapeDetails:
   const concurrencyLimit = 2;
   const processIdea = async (ideaData: typeof ideasData[0]) => {
       try {
+        let title = ideaData.title;
         let description = ideaData.description;
         let detailData: Partial<ScrapedIdea> = {};
 
         // Scrape Detail-Seite für vollständige Informationen
         if (scrapeDetails && ideaData.url) {
           detailData = await scrapeIdeaDetail(browser, ideaData.url);
+
+          // Verwende den vollständigen Titel von der Detailseite, falls vorhanden
+          if (detailData.title && detailData.title.length > title.length) {
+            title = detailData.title;
+          }
+
           if (detailData.description && detailData.description.length > description.length) {
             description = detailData.description;
           }
@@ -348,10 +363,10 @@ async function extractIdeasFromPage(page: Page, browser: Browser, scrapeDetails:
 
         if (scrapeDetails && description && description.length > 50) {
           try {
-            console.log(`[Ideenplattform] Generating AI enhancements for: ${ideaData.title.substring(0, 50)}...`);
+            console.log(`[Ideenplattform] Generating AI enhancements for: ${title.substring(0, 70)}...`);
             const enhancement = await enhanceIdea(
               {
-                title: ideaData.title,
+                title: title, // Verwende den vollständigen Titel
                 category: ideaData.category,
                 description: description,
               },
@@ -362,18 +377,20 @@ async function extractIdeasFromPage(page: Page, browser: Browser, scrapeDetails:
             aiSummary = enhancement.summary;
             aiHashtags = JSON.stringify(enhancement.hashtags);
 
+            console.log(`[Ideenplattform] ✓ Original: ${title.substring(0, 70)}...`);
             console.log(`[Ideenplattform] ✓ AI Title: ${aiTitle}`);
 
             // Rate limiting: wait 350ms between AI requests
             await new Promise(resolve => setTimeout(resolve, 350));
           } catch (aiError) {
-            console.error(`[Ideenplattform] AI enhancement failed for ${ideaData.title}:`, aiError);
+            console.error(`[Ideenplattform] AI enhancement failed for ${title}:`, aiError);
             // Continue without AI enhancement
           }
         }
 
         return {
           ...ideaData,
+          title, // Verwende den vollständigen Titel
           description,
           ...detailData,
           aiTitle,

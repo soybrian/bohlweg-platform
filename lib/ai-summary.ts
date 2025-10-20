@@ -15,106 +15,20 @@ const openai = new OpenAI({
 
 /**
  * Generiere eine 3-4 Sätze Zusammenfassung für Ideenplattform
+ * DEAKTIVIERT: Funktion generiert keine AI-Zusammenfassung mehr
  */
 export async function generateIdeenSummary(limit: number = 30): Promise<string> {
-  const db = getDatabase();
-
-  // Hole die neuesten Ideen
-  const ideas = db
-    .prepare("SELECT title, description, category, status, supporters FROM ideas ORDER BY CAST(externalId AS INTEGER) DESC LIMIT ?")
-    .all(limit) as Idea[];
-
-  if (ideas.length === 0) {
-    return "Aktuell sind keine Ideen vorhanden.";
-  }
-
-  // Erstelle Prompt für GPT
-  const ideasText = ideas.map((idea, i) =>
-    `${i + 1}. "${idea.title}" (${idea.category}, ${idea.supporters} Unterstützer) - ${idea.description?.substring(0, 150)}...`
-  ).join("\n\n");
-
-  const prompt = `Analysiere die folgenden ${ideas.length} Bürgerideen aus Braunschweig und erstelle eine prägnante 3-4 Sätze Zusammenfassung für Journalisten.
-
-Fokus:
-- Welche Hauptthemen beschäftigen die Bürger?
-- Welche Wünsche und Verbesserungsvorschläge gibt es?
-- Welche Trends oder Muster sind erkennbar?
-
-Die Zusammenfassung soll professionell, sachlich und informativ sein.
-
-Ideen:
-${ideasText}
-
-Zusammenfassung (3-4 Sätze):`;
-
-  try {
-    const response = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      max_tokens: 300,
-      messages: [{
-        role: "user",
-        content: prompt
-      }]
-    });
-
-    const summary = response.choices[0]?.message?.content || "";
-    return summary.trim();
-  } catch (error) {
-    console.error("[AI Summary] Fehler bei Ideen-Zusammenfassung:", error);
-    throw error;
-  }
+  console.log("[AI Summary] generateIdeenSummary ist deaktiviert");
+  return "AI-Zusammenfassung ist deaktiviert.";
 }
 
 /**
  * Generiere eine 3-4 Sätze Zusammenfassung für Mängelmelder
+ * DEAKTIVIERT: Funktion generiert keine AI-Zusammenfassung mehr
  */
 export async function generateMaengelSummary(limit: number = 30): Promise<string> {
-  const db = getDatabase();
-
-  // Hole die neuesten Mängel
-  const maengel = db
-    .prepare("SELECT title, description, category, status, location FROM maengel ORDER BY CAST(externalId AS INTEGER) DESC LIMIT ?")
-    .all(limit) as Maengel[];
-
-  if (maengel.length === 0) {
-    return "Aktuell sind keine Mängel gemeldet.";
-  }
-
-  // Erstelle Prompt für GPT
-  const maengelText = maengel.map((mangel, i) =>
-    `${i + 1}. "${mangel.title}" (${mangel.category}, ${mangel.status}) - ${mangel.description?.substring(0, 150)}...`
-  ).join("\n\n");
-
-  const prompt = `Analysiere die folgenden ${maengel.length} gemeldeten Mängel aus Braunschweig und erstelle eine prägnante 3-4 Sätze Zusammenfassung für Journalisten.
-
-Fokus:
-- Welche Hauptprobleme werden gemeldet?
-- In welchen Bereichen häufen sich Beschwerden?
-- Welche Dringlichkeit oder Muster sind erkennbar?
-
-Die Zusammenfassung soll professionell, sachlich und informativ sein.
-
-Mängel:
-${maengelText}
-
-Zusammenfassung (3-4 Sätze):`;
-
-  try {
-    const response = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      max_tokens: 300,
-      messages: [{
-        role: "user",
-        content: prompt
-      }]
-    });
-
-    const summary = response.choices[0]?.message?.content || "";
-    return summary.trim();
-  } catch (error) {
-    console.error("[AI Summary] Fehler bei Mängel-Zusammenfassung:", error);
-    throw error;
-  }
+  console.log("[AI Summary] generateMaengelSummary ist deaktiviert");
+  return "AI-Zusammenfassung ist deaktiviert.";
 }
 
 /**
@@ -132,6 +46,88 @@ export function saveSummary(moduleKey: string, summary: string, itemCount: numbe
   `).run(moduleKey, summary, itemCount, createdAt, validUntil);
 
   return result.lastInsertRowid as number;
+}
+
+/**
+ * Extrahiere strukturierte Event-Daten aus Text/HTML mit GPT-4o-mini
+ * Akzeptiert sowohl HTML als auch extrahierten Text
+ */
+export async function extractEventDataWithAI(content: string, url: string): Promise<any> {
+  try {
+    // Begrenze auf 30k Zeichen für Token-Limits
+    const truncatedContent = content.substring(0, 30000);
+
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        {
+          role: "system",
+          content: `Du bist ein Experte für die Extraktion strukturierter Event-Daten.
+
+Extrahiere ALLE tatsächlichen Event-Informationen und gebe sie als JSON zurück.
+
+JSON-Struktur:
+{
+  "event": {
+    "title": string (der echte Event-Titel),
+    "description": string (die vollständige Beschreibung/Text des Events - mindestens 2-3 Sätze wenn vorhanden),
+    "dates": [{"date": "DD. Monat YYYY", "time": "HH:MM - HH:MM"}] (alle Termine - extrahiere ALLE Daten!),
+    "location": {
+      "name": string (echter Veranstaltungsort-Name - z.B. "Allgemeiner Konsumverein"),
+      "address": string (echte Straße + Hausnummer - z.B. "Hinter Liebfrauen 2"),
+      "postal_code": string (echte PLZ - z.B. "38100"),
+      "city": string (echte Stadt - z.B. "Braunschweig")
+    },
+    "organizer": {
+      "name": string (echter Veranstalter-Name),
+      "address": string (wenn verfügbar),
+      "phone": string (wenn verfügbar),
+      "email": string (wenn verfügbar),
+      "website": string (wenn verfügbar - vollständige URL)
+    },
+    "category": string (Event-Kategorie),
+    "mood_category": string (EINE der folgenden Kategorien basierend auf der Event-Beschreibung):
+      - "Das crazy" (für skurrile, außergewöhnliche, verrückte Events - z.B. experimentelle Kunst, ungewöhnliche Performances)
+      - "Lustig" (für Comedy, humorvolle Shows, unterhaltsame Events die zum Lachen bringen)
+      - "Interessant" (für kulturell/intellektuell anspruchsvolle Events - Ausstellungen, Vorträge, klassische Konzerte)
+      - "Kann man sich geben" (für solide, angenehme Events ohne besondere Highlights - Standard-Veranstaltungen),
+    "price_info": string (Preis-Information),
+    "is_free": boolean (true wenn kostenlos),
+    "ticket_url": string (vollständige URL zum Ticket-Kauf wenn vorhanden - z.B. Links die "Tickets kaufen" oder "Jetzt buchen" heißen),
+    "image_urls": [string] (alle vollständigen Bild-URLs)
+  }
+}
+
+KRITISCH WICHTIG:
+- Extrahiere NUR echte Daten
+- NIEMALS erfundene/Platzhalter-Daten verwenden
+- Wenn ein Feld nicht vorhanden: setze auf null oder ""
+- Textinhalte VOLLSTÄNDIG übernehmen
+- Suche nach Links wie "Tickets kaufen", "Jetzt buchen", oder ähnlichen Begriffen für ticket_url
+- Wähle die mood_category basierend auf Ton, Inhalt und Zielgruppe des Events
+- Antworte NUR mit gültigem JSON`
+        },
+        {
+          role: "user",
+          content: `Extrahiere alle Event-Daten aus diesem Inhalt:\n\n${truncatedContent}`
+        }
+      ],
+      response_format: { type: "json_object" },
+      temperature: 0.1,
+    });
+
+    const responseContent = response.choices[0]?.message?.content;
+    if (!responseContent) {
+      throw new Error("No response from OpenAI");
+    }
+
+    const extracted = JSON.parse(responseContent);
+    console.log(`[AI Extract] Erfolgreich extrahiert für ${url}`);
+    return extracted;
+  } catch (error) {
+    console.error(`[AI Extract] Fehler bei ${url}:`, error);
+    return null;
+  }
 }
 
 /**
