@@ -823,7 +823,7 @@ export function upsertEvent(event: Omit<EventItem, "id">, eventDates?: Array<{ d
           startDate = ?, endDate = ?, startTime = ?, endTime = ?,
           venueName = ?, venueAddress = ?, venuePostcode = ?, venueCity = ?,
           organizer = ?, imageUrl = ?, category = ?, categories = ?,
-          price = ?, isFree = ?, url = ?, status = ?,
+          price = ?, priceFormatted = ?, isFree = ?, ticketUrl = ?, organizerWebsite = ?, url = ?, status = ?,
           scraped_at = ?, modified_at = ?,
           detailScraped = ?, detailScrapedAt = ?
         WHERE id = ?
@@ -832,7 +832,7 @@ export function upsertEvent(event: Omit<EventItem, "id">, eventDates?: Array<{ d
         event.startDate || null, event.endDate || null, event.startTime || null, event.endTime || null,
         event.venueName || null, event.venueAddress || null, event.venuePostcode || null, event.venueCity || 'Braunschweig',
         event.organizer || null, event.imageUrl || null, event.category || null, event.categories || null,
-        event.price || null, event.isFree ? 1 : 0, event.url, event.status || 'active',
+        event.price || null, event.priceFormatted || null, event.isFree ? 1 : 0, event.ticketUrl || null, event.organizerWebsite || null, event.url, event.status || 'active',
         event.scraped_at, new Date().toISOString(),
         event.detailScraped ? 1 : 0, event.detailScrapedAt || null,
         existing.id
@@ -870,16 +870,16 @@ export function upsertEvent(event: Omit<EventItem, "id">, eventDates?: Array<{ d
         startDate, endDate, startTime, endTime,
         venueName, venueAddress, venuePostcode, venueCity,
         organizer, imageUrl, category, categories,
-        price, isFree, url, status, scraped_at,
+        price, priceFormatted, isFree, ticketUrl, organizerWebsite, url, status, scraped_at,
         detailScraped, detailScrapedAt
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       event.externalId, event.title, event.description || null, event.shortDescription || null,
       event.startDate || null, event.endDate || null, event.startTime || null, event.endTime || null,
       event.venueName || null, event.venueAddress || null, event.venuePostcode || null, event.venueCity || 'Braunschweig',
       event.organizer || null, event.imageUrl || null, event.category || null, event.categories || null,
-      event.price || null, event.isFree ? 1 : 0, event.url, event.status || 'active', event.scraped_at,
+      event.price || null, event.priceFormatted || null, event.isFree ? 1 : 0, event.ticketUrl || null, event.organizerWebsite || null, event.url, event.status || 'active', event.scraped_at,
       event.detailScraped ? 1 : 0, event.detailScrapedAt || null
     );
 
@@ -905,4 +905,29 @@ export function upsertEvent(event: Omit<EventItem, "id">, eventDates?: Array<{ d
 
     return { isNew: true, id: eventId, hasChanged: false };
   }
+}
+
+/**
+ * Delete all events and event_dates (for full rescrape)
+ */
+export function deleteAllEvents(): { eventsDeleted: number; datesDeleted: number } {
+  const db = getDatabase();
+
+  const datesResult = db.prepare('DELETE FROM event_dates').run();
+  const eventsResult = db.prepare('DELETE FROM events').run();
+
+  return {
+    eventsDeleted: eventsResult.changes,
+    datesDeleted: datesResult.changes
+  };
+}
+
+/**
+ * Get all existing event external IDs (for incremental updates)
+ */
+export function getExistingEventIds(): string[] {
+  const db = getDatabase();
+
+  const rows = db.prepare('SELECT externalId FROM events').all() as Array<{ externalId: string }>;
+  return rows.map(row => row.externalId);
 }

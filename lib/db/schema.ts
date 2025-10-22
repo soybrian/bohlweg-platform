@@ -139,10 +139,11 @@ export interface EventItem {
   imageUrl?: string;
   category?: string;
   categories?: string; // JSON array
-  moodCategory?: string; // "Das crazy" | "Lustig" | "Interessant" | "Kann man sich geben"
   price?: string;
+  priceFormatted?: string; // AI-extracted lowest regular price (e.g. "12€", "7,50€")
   isFree?: boolean;
   ticketUrl?: string; // URL to buy tickets
+  organizerWebsite?: string; // Organizer's homepage (from "Webseite der Veranstaltung")
   url: string;
   status?: string;
   scraped_at: string;

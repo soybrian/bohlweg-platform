@@ -30,10 +30,11 @@ interface ScrapedEvent {
   organizer?: string;
   imageUrl?: string;
   category?: string;
-  moodCategory?: string;
   price?: string;
+  priceFormatted?: string;
   isFree?: boolean;
   ticketUrl?: string;
+  organizerWebsite?: string;
   url: string;
   status?: string;
   detailScraped?: boolean;
@@ -66,7 +67,7 @@ function parseGermanDate(text: string): string | undefined {
 /**
  * PHASE 1: Sammle alle Event-URLs durch Klicken von "Mehr laden"
  */
-async function collectAllEventUrls(page: Page, maxClicks: number = 100): Promise<string[]> {
+export async function collectAllEventUrls(page: Page, maxClicks: number = 100): Promise<string[]> {
   console.log('[Events] Lade Hauptseite...');
   await page.goto(BASE_URL, { waitUntil: 'networkidle', timeout: 30000 });
 
@@ -118,10 +119,16 @@ async function collectAllEventUrls(page: Page, maxClicks: number = 100): Promise
  * PHASE 2: Scrape Detail-Seite für vollständige Event-Informationen
  * Nutzt GPT-4o-mini für bessere Datenextraktion
  */
-async function scrapeEventDetail(browser: Browser, url: string, useAI: boolean = true): Promise<ScrapedEvent | null> {
+export async function scrapeEventDetail(browser: Browser, url: string, useAI: boolean = true): Promise<ScrapedEvent | null> {
   let context: BrowserContext | null = null;
 
   try {
+    // Check if browser is still connected before creating context
+    if (!browser.isConnected()) {
+      console.error(`[Events] Browser is disconnected, skipping ${url}`);
+      return null;
+    }
+
     context = await browser.newContext();
     const page = await context.newPage();
 
@@ -209,10 +216,11 @@ async function scrapeEventDetail(browser: Browser, url: string, useAI: boolean =
           venueCity: aiData.location?.city || 'Braunschweig',
           organizer: aiData.organizer?.name,
           imageUrl: aiData.image_urls?.[0],
-          moodCategory: aiData.mood_category,
           price: aiData.price_info,
+          priceFormatted: aiData.price_formatted,
           isFree: aiData.is_free || (aiData.price_info && /kostenlos|frei/i.test(aiData.price_info)),
           ticketUrl: aiData.ticket_url,
+          organizerWebsite: aiData.organizer_website,
           url,
           status: 'active',
           detailScraped: true,
@@ -339,6 +347,13 @@ async function scrapeEventDetail(browser: Browser, url: string, useAI: boolean =
       };
     }, url);
 
+    // Webseite der Veranstaltung (Veranstalter-Homepage) - MUSS außerhalb von page.evaluate() sein!
+    let websiteUrl: string | undefined;
+    const websiteLink = await page.locator('a:has-text("Webseite der Veranstaltung"), a:has-text("Website der Veranstaltung")').first();
+    if (await websiteLink.count() > 0) {
+      websiteUrl = await websiteLink.getAttribute('href') || undefined;
+    }
+
     await context.close();
 
     // Parse Datum
@@ -359,6 +374,7 @@ async function scrapeEventDetail(browser: Browser, url: string, useAI: boolean =
       imageUrl: eventData.imageUrl,
       price: eventData.price,
       isFree: eventData.isFree,
+      organizerWebsite: websiteUrl,
       url,
       status: 'active',
       detailScraped: true,
@@ -379,10 +395,11 @@ async function scrapeAllEventDetails(
   browser: Browser,
   urls: string[],
   concurrency: number = 3
-): Promise<{ itemsScraped: number; itemsNew: number; itemsUpdated: number }> {
+): Promise<{ itemsScraped: number; itemsNew: number; itemsUpdated: number; itemsFailed: number }> {
   let itemsScraped = 0;
   let itemsNew = 0;
   let itemsUpdated = 0;
+  let itemsFailed = 0;
   const total = urls.length;
   const scraped_at = new Date().toISOString();
 
@@ -394,11 +411,19 @@ async function scrapeAllEventDetails(
 
     console.log(`[Events] Batch ${Math.floor(i/concurrency) + 1}/${Math.ceil(total/concurrency)} (${progress}%)...`);
 
+    // Check if browser is still connected before processing batch
+    if (!browser.isConnected()) {
+      console.error('[Events] Browser disconnected, aborting remaining scrapes');
+      itemsFailed += urls.length - i;
+      break;
+    }
+
     const batchPromises = batch.map(url => scrapeEventDetail(browser, url));
     const batchResults = await Promise.all(batchPromises);
 
     // Speichere Events SOFORT in Datenbank
-    for (const event of batchResults) {
+    for (let j = 0; j < batchResults.length; j++) {
+      const event = batchResults[j];
       if (event) {
         try {
           const { allDates, ...eventData } = event;
@@ -409,7 +434,12 @@ async function scrapeAllEventDetails(
           if (result.hasChanged) itemsUpdated++;
         } catch (error) {
           console.error(`[Events] Fehler beim Speichern von ${event.externalId}:`, error);
+          itemsFailed++;
         }
+      } else {
+        // Event scraping failed
+        itemsFailed++;
+        console.error(`[Events] Scraping fehlgeschlagen für ${batch[j]}`);
       }
     }
 
@@ -419,8 +449,8 @@ async function scrapeAllEventDetails(
     }
   }
 
-  console.log(`[Events] ✓ ${itemsScraped}/${total} Events erfolgreich gescrapt und gespeichert`);
-  return { itemsScraped, itemsNew, itemsUpdated };
+  console.log(`[Events] ✓ ${itemsScraped}/${total} Events erfolgreich gescrapt und gespeichert (${itemsFailed} fehlgeschlagen)`);
+  return { itemsScraped, itemsNew, itemsUpdated, itemsFailed };
 }
 
 /**
@@ -434,10 +464,12 @@ export async function scrapeEventsBraunschweig(
   let itemsScraped = 0;
   let itemsNew = 0;
   let itemsUpdated = 0;
+  let browser = null;
+  let page = null;
 
   try {
     console.log('[Events] Starte Browser...');
-    const browser = await chromium.launch({
+    browser = await chromium.launch({
       headless: true,
       args: [
         '--no-sandbox',
@@ -447,10 +479,14 @@ export async function scrapeEventsBraunschweig(
       ],
     });
 
-    const page = await browser.newPage();
+    page = await browser.newPage();
 
     // PHASE 1: Sammle alle Event-URLs
     const eventUrls = await collectAllEventUrls(page, 100);
+
+    // Close the page after collecting URLs to free resources
+    await page.close();
+    page = null;
 
     // Optional: Limitiere Anzahl
     const urlsToScrape = maxEvents ? eventUrls.slice(0, maxEvents) : eventUrls;
@@ -461,7 +497,11 @@ export async function scrapeEventsBraunschweig(
     itemsNew = result.itemsNew;
     itemsUpdated = result.itemsUpdated;
 
-    await browser.close();
+    // Close browser properly
+    if (browser && browser.isConnected()) {
+      await browser.close();
+      browser = null;
+    }
 
     console.log(`[Events] ✓ Scraping abgeschlossen: ${itemsScraped} Events (${itemsNew} neu, ${itemsUpdated} aktualisiert)`);
 
@@ -470,6 +510,14 @@ export async function scrapeEventsBraunschweig(
     return { success: true, itemsScraped, itemsNew, itemsUpdated };
   } catch (error) {
     console.error('[Events] Fehler beim Scraping:', error);
+
+    // Cleanup on error
+    try {
+      if (page) await page.close().catch(() => {});
+      if (browser && browser.isConnected()) await browser.close().catch(() => {});
+    } catch (cleanupError) {
+      console.error('[Events] Fehler beim Cleanup:', cleanupError);
+    }
 
     const errorMessage = error instanceof Error ? error.message : String(error);
     endScraperRun(runId, { itemsScraped, itemsNew, itemsUpdated, success: false, error: errorMessage });

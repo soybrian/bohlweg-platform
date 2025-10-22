@@ -1,36 +1,14 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Search, Filter, Calendar, MapPin, Clock, User, ExternalLink, X, Sparkles, Tag, CalendarPlus, ArrowUpRight } from "lucide-react";
+import { Search, Filter, Calendar, MapPin, Clock, User, ExternalLink, X, Sparkles, Tag, CalendarPlus, ArrowUpRight, ChevronDown, CheckCircle2, SlidersHorizontal, Coffee } from "lucide-react";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { eventsQuickActions } from "@/lib/quick-actions";
-
-interface Event {
-  id: number;
-  externalId: string;
-  title: string;
-  description?: string;
-  startDate?: string;
-  endDate?: string;
-  startTime?: string;
-  endTime?: string;
-  venueName?: string;
-  venueAddress?: string;
-  venueCity?: string;
-  organizer?: string;
-  imageUrl?: string;
-  category?: string;
-  moodCategory?: string;
-  price?: string;
-  isFree?: boolean;
-  ticketUrl?: string;
-  url: string;
-  status?: string;
-  scraped_at: string;
-  dates_count?: number; // Number of additional dates
-}
+import { Event } from "./types";
+import { groupEventsByDate, getEndOfWeek, formatDateHeader, cleanVenueName, getEventStatus } from "./helpers";
+import EventCard from "@/app/components/EventCard";
 
 export default function EventsPage() {
   const [searchQuery, setSearchQuery] = useState("");
@@ -56,6 +34,9 @@ export default function EventsPage() {
   const [showCustomInput, setShowCustomInput] = useState(false);
   const [stickyDate, setStickyDate] = useState<string>("");
   const [currentWeekEnd, setCurrentWeekEnd] = useState<string>("");
+  const [collapsedDates, setCollapsedDates] = useState<Set<string>>(new Set());
+  const [activeFilters, setActiveFilters] = useState<Set<'afterWork' | 'weekend' | 'free'>>(new Set());
+  const [showFilterPills, setShowFilterPills] = useState(false);
   const answerContainerRef = useRef<HTMLDivElement | null>(null);
   const customInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -85,6 +66,13 @@ export default function EventsPage() {
     loadData();
     loadVenues();
   }, []);
+
+  // Reload data when filters change
+  useEffect(() => {
+    if (!loading) {
+      loadData();
+    }
+  }, [activeFilters]);
 
   // Sticky Date Header - Intersection Observer
   useEffect(() => {
@@ -131,6 +119,54 @@ export default function EventsPage() {
     }
   }, [displayedEvents]);
 
+  // Auto-collapse only 'Heute' (today) if all events have ended
+  useEffect(() => {
+    const collapsed = new Set<string>();
+    const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD format
+
+    groupEventsByDate(displayedEvents).forEach((events, date) => {
+      const allEnded = events.every(event => getEventStatus(event) === 'ended');
+      // Only collapse if it's today AND all events have ended
+      if (date === today && allEnded) {
+        collapsed.add(date);
+      }
+    });
+
+    setCollapsedDates(collapsed);
+  }, [displayedEvents]);
+
+  const toggleDate = (date: string) => {
+    setCollapsedDates(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(date)) {
+        newSet.delete(date);
+      } else {
+        newSet.add(date);
+      }
+      return newSet;
+    });
+  };
+
+  const toggleFilter = (filter: 'afterWork' | 'weekend' | 'free') => {
+    setActiveFilters(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(filter)) {
+        newSet.delete(filter);
+      } else {
+        newSet.add(filter);
+      }
+      return newSet;
+    });
+  };
+
+  const buildFilterQuery = () => {
+    const params = new URLSearchParams();
+    if (activeFilters.has('afterWork')) params.set('afterWork', 'true');
+    if (activeFilters.has('weekend')) params.set('weekend', 'true');
+    if (activeFilters.has('free')) params.set('free', 'true');
+    return params.toString();
+  };
+
   const loadVenues = async () => {
     try {
       const res = await fetch('/api/events/venues');
@@ -157,7 +193,9 @@ export default function EventsPage() {
       const endOfWeek = getEndOfWeek();
       setCurrentWeekEnd(endOfWeek);
 
-      const res = await fetch(`/api/events?limit=100&offset=0&endDate=${endOfWeek}`);
+      const filterQuery = buildFilterQuery();
+      const url = `/api/events?limit=100&offset=0&endDate=${endOfWeek}${filterQuery ? '&' + filterQuery : ''}`;
+      const res = await fetch(url);
 
       if (res.ok) {
         const data = await res.json();
@@ -166,7 +204,7 @@ export default function EventsPage() {
 
         setBuffer(events);
         setDisplayedEvents(events);
-        setOffset(0); // Reset offset for week-based loading
+        setOffset(0);
         setTotalCount(total);
       }
     } catch (error) {
@@ -182,7 +220,9 @@ export default function EventsPage() {
     try {
       const venueParam = venue ? `&venue=${encodeURIComponent(venue)}` : '';
       const searchParam = debouncedSearch ? `&search=${encodeURIComponent(debouncedSearch)}` : '';
-      const res = await fetch(`/api/events?limit=${ITEMS_TO_FETCH}&offset=0${venueParam}${searchParam}`);
+      const filterQuery = buildFilterQuery();
+      const url = `/api/events?limit=${ITEMS_TO_FETCH}&offset=0${venueParam}${searchParam}${filterQuery ? '&' + filterQuery : ''}`;
+      const res = await fetch(url);
 
       if (res.ok) {
         const data = await res.json();
@@ -207,7 +247,9 @@ export default function EventsPage() {
 
     setLoading(true);
     try {
-      const res = await fetch(`/api/events?search=${encodeURIComponent(query)}&limit=100`);
+      const filterQuery = buildFilterQuery();
+      const url = `/api/events?search=${encodeURIComponent(query)}&limit=100${filterQuery ? '&' + filterQuery : ''}`;
+      const res = await fetch(url);
       if (res.ok) {
         const data = await res.json();
         const results = data.events || [];
@@ -219,6 +261,43 @@ export default function EventsPage() {
       setLoading(false);
     }
   };
+
+  const loadMore = useCallback(async () => {
+    setLoadingMore(true);
+
+    try {
+      // Calculate next week's date range
+      const nextWeekStart = new Date(currentWeekEnd);
+      nextWeekStart.setDate(nextWeekStart.getDate() + 1); // Day after current week end
+
+      const nextWeekEnd = new Date(nextWeekStart);
+      nextWeekEnd.setDate(nextWeekEnd.getDate() + 6); // 7 days = 1 week
+
+      const startDateStr = nextWeekStart.toISOString().split('T')[0];
+      const endDateStr = nextWeekEnd.toISOString().split('T')[0];
+
+      const filterQuery = buildFilterQuery();
+      const url = `/api/events?limit=100&offset=0&startDate=${startDateStr}&endDate=${endDateStr}${filterQuery ? '&' + filterQuery : ''}`;
+      const res = await fetch(url);
+      if (res.ok) {
+        const data = await res.json();
+        const newEvents = data.events || [];
+
+        if (newEvents.length > 0) {
+          // Append new week's events to displayed events
+          setDisplayedEvents(prev => [...prev, ...newEvents]);
+          setBuffer(prev => [...prev, ...newEvents]);
+
+          // Update current week end to the new week
+          setCurrentWeekEnd(endDateStr);
+        }
+      }
+    } catch (error) {
+      console.error("Error loading more events:", error);
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [currentWeekEnd, buildFilterQuery]);
 
   // Infinite Scroll
   useEffect(() => {
@@ -234,7 +313,8 @@ export default function EventsPage() {
         const scrollHeight = document.documentElement.scrollHeight;
         const clientHeight = document.documentElement.clientHeight;
 
-        if (scrollTop + clientHeight >= scrollHeight * 0.8) {
+        // Trigger at 70% to load earlier (better UX)
+        if (scrollTop + clientHeight >= scrollHeight * 0.7) {
           loadMore();
         }
       }, 100);
@@ -245,42 +325,7 @@ export default function EventsPage() {
       clearTimeout(scrollTimeout);
       window.removeEventListener("scroll", handleScroll);
     };
-  }, [loadingMore, displayedEvents.length, buffer.length, searchQuery, offset]);
-
-  const loadMore = async () => {
-    setLoadingMore(true);
-
-    try {
-      // Calculate next week's date range
-      const nextWeekStart = new Date(currentWeekEnd);
-      nextWeekStart.setDate(nextWeekStart.getDate() + 1); // Day after current week end
-
-      const nextWeekEnd = new Date(nextWeekStart);
-      nextWeekEnd.setDate(nextWeekEnd.getDate() + 6); // 7 days = 1 week
-
-      const startDateStr = nextWeekStart.toISOString().split('T')[0];
-      const endDateStr = nextWeekEnd.toISOString().split('T')[0];
-
-      const res = await fetch(`/api/events?limit=100&offset=0&startDate=${startDateStr}&endDate=${endDateStr}`);
-      if (res.ok) {
-        const data = await res.json();
-        const newEvents = data.events || [];
-
-        if (newEvents.length > 0) {
-          // Append new week's events to displayed events
-          setDisplayedEvents([...displayedEvents, ...newEvents]);
-          setBuffer([...buffer, ...newEvents]);
-
-          // Update current week end to the new week
-          setCurrentWeekEnd(endDateStr);
-        }
-      }
-    } catch (error) {
-      console.error("Error loading more events:", error);
-    } finally {
-      setLoadingMore(false);
-    }
-  };
+  }, [loadingMore, displayedEvents.length, buffer.length, searchQuery, offset, loadMore]);
 
   // Format date
   const formatDate = (dateStr?: string) => {
@@ -301,134 +346,6 @@ export default function EventsPage() {
     return `${startTime} Uhr`;
   };
 
-  // Clean venue name (remove HTML artifacts)
-  const cleanVenueName = (venueName?: string) => {
-    if (!venueName) return "";
-    // Extract just the venue name if it contains HTML-like content
-    const lines = venueName.split('\n').filter(line => line.trim());
-    if (lines.length > 0 && lines[0].includes('Veranstaltungsort')) {
-      return lines[1]?.trim() || "";
-    }
-    return lines[0]?.trim() || "";
-  };
-
-  // Group events by date
-  const groupEventsByDate = (events: Event[]): Map<string, Event[]> => {
-    const grouped = new Map<string, Event[]>();
-
-    events.forEach(event => {
-      if (!event.startDate) return;
-
-      const existing = grouped.get(event.startDate);
-      if (existing) {
-        existing.push(event);
-      } else {
-        grouped.set(event.startDate, [event]);
-      }
-    });
-
-    return grouped;
-  };
-
-
-  // Get end of current week (Sunday)
-  const getEndOfWeek = () => {
-    const today = new Date();
-    const dayOfWeek = today.getDay(); // 0 = Sunday, 6 = Saturday
-    const daysUntilSunday = dayOfWeek === 0 ? 0 : 7 - dayOfWeek;
-    const endOfWeek = new Date(today);
-    endOfWeek.setDate(today.getDate() + daysUntilSunday);
-    return endOfWeek.toISOString().split('T')[0]; // YYYY-MM-DD
-  };
-
-  // Get event status (upcoming, live, ended)
-  const getEventStatus = (event: Event): 'upcoming' | 'live' | 'ended' => {
-    // Nur für heutige Events relevant
-    const eventDate = new Date(event.startDate || '');
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    eventDate.setHours(0, 0, 0, 0);
-
-    if (eventDate.getTime() !== today.getTime()) {
-      return 'upcoming'; // Nicht heute
-    }
-
-    // Heutiges Event - Zeit prüfen
-    const now = new Date();
-    const currentTime = now.getHours() * 60 + now.getMinutes();
-
-    // Parse startTime (z.B. "19:30")
-    const startParts = event.startTime?.split(':');
-    const startMinutes = startParts ? parseInt(startParts[0]) * 60 + parseInt(startParts[1]) : 0;
-
-    // Parse endTime (z.B. "21:30")
-    const endParts = event.endTime?.split(':');
-    const endMinutes = endParts ? parseInt(endParts[0]) * 60 + parseInt(endParts[1]) : 0;
-
-    if (!event.endTime) {
-      // Kein endTime: Event ist "upcoming" wenn startTime in Zukunft
-      return currentTime >= startMinutes ? 'live' : 'upcoming';
-    }
-
-    // Event vorbei
-    if (currentTime > endMinutes) return 'ended';
-
-    // Event läuft gerade
-    if (currentTime >= startMinutes && currentTime <= endMinutes) return 'live';
-
-    // Event kommt noch
-    return 'upcoming';
-  };
-
-  // Format date header with relative days (e.g. "Morgen, 20. Okt" or "Donnerstag, 14. Okt")
-  const formatDateHeader = (dateStr: string) => {
-    const eventDate = new Date(dateStr);
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    eventDate.setHours(0, 0, 0, 0);
-
-    const diffTime = eventDate.getTime() - today.getTime();
-    const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24));
-
-    const day = eventDate.toLocaleDateString("de-DE", { day: "numeric" });
-    const month = eventDate.toLocaleDateString("de-DE", { month: "short" });
-    const weekday = eventDate.toLocaleDateString("de-DE", { weekday: "long" });
-
-    // Events der aktuellen Woche: nur Wochentag
-    if (diffDays >= 0 && diffDays <= 6) {
-      if (diffDays === 0) return `Heute, ${weekday}`;
-      if (diffDays === 1) return `Morgen, ${weekday}`;
-      if (diffDays === 2) return `Übermorgen, ${weekday}`;
-      return weekday; // Tag 3-6 der Woche
-    }
-
-    // Ab nächster Woche: Wochentag + Datum
-    return `${weekday}, ${day}. ${month}`;
-  };
-
-  // Get initials from event title (first letter)
-  const getEventInitial = (title: string) => {
-    return title.charAt(0).toUpperCase();
-  };
-
-  // Generate gradient color based on title
-  const getGradientForTitle = (title: string) => {
-    const gradients = [
-      "from-blue-500 to-purple-500",
-      "from-purple-500 to-pink-500",
-      "from-pink-500 to-rose-500",
-      "from-rose-500 to-orange-500",
-      "from-orange-500 to-yellow-500",
-      "from-yellow-500 to-green-500",
-      "from-green-500 to-teal-500",
-      "from-teal-500 to-cyan-500",
-      "from-cyan-500 to-blue-500",
-    ];
-
-    // Use character code sum for consistent color per title
-    const sum = title.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
-    return gradients[sum % gradients.length];
-  };
 
   // Close modal with animation
   const closeModal = () => {
@@ -485,33 +402,69 @@ export default function EventsPage() {
       <div className="px-4 md:px-6">
         {/* Action Buttons - Minimal Icons */}
         <div className="flex gap-2 mb-3 pb-[10px] justify-center">
-          <button
-            onClick={() => setShowSearchInput(!showSearchInput)}
-            className={cn(
-              "glass-card border-none w-9 h-9 rounded-full flex items-center justify-center transition-all duration-300 hover:bg-white/8",
-              showSearchInput ? "text-white bg-white/8" : "text-white/60"
-            )}
-          >
-            <Search size={16} className="flex-shrink-0" />
-          </button>
-          <button
-            onClick={() => setShowSummary(!showSummary)}
-            className={cn(
-              "glass-card border-none w-9 h-9 rounded-full flex items-center justify-center transition-all duration-300 hover:bg-white/8",
-              showSummary ? "text-white bg-white/8" : "text-white/60"
-            )}
-          >
-            <Sparkles size={16} className="flex-shrink-0" />
-          </button>
-          <a
-            href="/api/events/ical"
-            target="_blank"
-            rel="noopener noreferrer"
-            title="Events in Kalender-App abonnieren (iPhone, Android, Google Calendar, Outlook)"
-            className="glass-card border-none w-9 h-9 rounded-full flex items-center justify-center transition-all duration-300 hover:bg-white/8 text-white/60 hover:text-green-400"
-          >
-            <CalendarPlus size={16} className="flex-shrink-0" />
-          </a>
+            {/* Filter Button Group - Links */}
+            <div className="flex">
+              <button
+                onClick={() => setShowFilterPills(!showFilterPills)}
+                className={cn(
+                  "glass-card border-none w-9 h-9 rounded-full flex items-center justify-center transition-all duration-300 hover:bg-white/8 relative overflow-visible",
+                  showFilterPills ? "text-white bg-white/8" : "text-white/60"
+                )}
+              >
+                <SlidersHorizontal size={16} className="flex-shrink-0" />
+                <span className={cn(
+                  "absolute -top-1 -right-1 bg-white text-black text-[9px] font-bold rounded-full min-w-[16px] h-4 flex items-center justify-center transition-all duration-300 ease-out",
+                  activeFilters.size > 0
+                    ? "px-1 opacity-100 scale-100"
+                    : "px-0 opacity-0 scale-0"
+                )}>
+                  {activeFilters.size > 0 ? activeFilters.size : ''}
+                </span>
+              </button>
+              {/* Filtered Calendar Button - Only shows when filters are active */}
+              <div className={cn(
+                "transition-all duration-300 ease-out",
+                activeFilters.size > 0 ? "w-[44px] ml-2 opacity-100" : "w-0 ml-0 opacity-0"
+              )}>
+                <a
+                  href={activeFilters.size > 0 ? `/api/events/ical?${buildFilterQuery()}` : "#"}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title="Gefilterte Events in Kalender-App abonnieren"
+                  className={cn(
+                    "glass-card border-none w-9 h-9 rounded-full flex items-center justify-center hover:bg-white/8 text-white/60 hover:text-green-400",
+                    "transition-all duration-300 ease-out",
+                    activeFilters.size > 0
+                      ? "pointer-events-auto"
+                      : "pointer-events-none"
+                  )}
+                >
+                  <CalendarPlus size={16} className="flex-shrink-0" />
+                </a>
+              </div>
+            </div>
+
+            {/* Search Button - Mitte */}
+            <button
+              onClick={() => setShowSearchInput(!showSearchInput)}
+              className={cn(
+                "glass-card border-none w-9 h-9 rounded-full flex items-center justify-center transition-all duration-300 hover:bg-white/8",
+                showSearchInput ? "text-white bg-white/8" : "text-white/60"
+              )}
+            >
+              <Search size={16} className="flex-shrink-0" />
+            </button>
+
+            {/* AI Button - Rechts */}
+            <button
+              onClick={() => setShowSummary(!showSummary)}
+              className={cn(
+                "glass-card border-none w-9 h-9 rounded-full flex items-center justify-center transition-all duration-300 hover:bg-white/8",
+                showSummary ? "text-white bg-white/8" : "text-white/60"
+              )}
+            >
+              <Sparkles size={16} className="flex-shrink-0" />
+            </button>
         </div>
 
         {/* Search Input Field */}
@@ -564,6 +517,58 @@ export default function EventsPage() {
                   </div>
                 )}
               </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Filter Pills */}
+        <div className={cn(
+          "grid transition-all duration-300 ease-out overflow-hidden",
+          showFilterPills ? "grid-rows-[1fr] opacity-100 mb-4" : "grid-rows-[0fr] opacity-0 mb-0"
+        )}>
+          <div className="overflow-hidden">
+            <div className="flex gap-2 overflow-x-auto scrollbar-hide pb-1 justify-center">
+              {/* After Work Filter */}
+              <button
+                onClick={() => toggleFilter('afterWork')}
+                className={cn(
+                  "flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all duration-200 whitespace-nowrap",
+                  activeFilters.has('afterWork')
+                    ? "bg-white/20 border border-white/40 text-white"
+                    : "bg-white/5 border border-white/20 text-white/70 hover:bg-white/10"
+                )}
+              >
+                <Coffee size={12} />
+                <span>After Work</span>
+              </button>
+
+              {/* Weekend Filter */}
+              <button
+                onClick={() => toggleFilter('weekend')}
+                className={cn(
+                  "flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all duration-200 whitespace-nowrap",
+                  activeFilters.has('weekend')
+                    ? "bg-white/20 border border-white/40 text-white"
+                    : "bg-white/5 border border-white/20 text-white/70 hover:bg-white/10"
+                )}
+              >
+                <Calendar size={12} />
+                <span>Weekend</span>
+              </button>
+
+              {/* Free Filter */}
+              <button
+                onClick={() => toggleFilter('free')}
+                className={cn(
+                  "flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all duration-200 whitespace-nowrap",
+                  activeFilters.has('free')
+                    ? "bg-white/20 border border-white/40 text-white"
+                    : "bg-white/5 border border-white/20 text-white/70 hover:bg-white/10"
+                )}
+              >
+                <CheckCircle2 size={12} />
+                <span>Kostenlos</span>
+              </button>
             </div>
           </div>
         </div>
@@ -757,74 +762,64 @@ export default function EventsPage() {
                 {/* Vertical timeline line */}
                 <div className="absolute left-0 top-0 bottom-0 w-[2px] border-l-[3px] border-dotted border-white/40" style={{ borderSpacing: '8px' }}></div>
 
-                {Array.from(groupEventsByDate(displayedEvents)).map(([date, events], groupIndex) => (
-                  <div key={date} className="mb-6 relative" data-date={date} id={`date-${date}`}>
-                    {/* Date Header with Timeline Dot */}
-                    <div className="text-sm font-medium text-white/50 mb-3 relative flex items-center">
-                      <div className="absolute -left-[41px] w-5 h-5 rounded-full bg-white/90 z-10"></div>
-                      <span className="whitespace-nowrap">{formatDateHeader(date)}</span>
-                    </div>
+                {Array.from(groupEventsByDate(displayedEvents)).map(([date, events], groupIndex) => {
+                  const allEnded = events.every(event => getEventStatus(event) === 'ended');
+                  const isCollapsed = collapsedDates.has(date);
+                  const today = new Date().toISOString().split('T')[0];
+                  const isToday = date === today;
+                  const showCollapse = isToday && allEnded;
 
-                    {/* Events */}
-                    <div className="space-y-0">
-                      {events.map((event, idx) => (
-                        <div
-                          key={event.id}
-                          onClick={() => {
-                            setSelectedEvent(event);
-                            setShowDetailModal(true);
-                          }}
-                          className="group relative rounded-lg hover:bg-white/[0.03] transition-all duration-150 cursor-pointer px-2 py-2.5 -mx-2 opacity-0 animate-[fadeIn_0.3s_ease-out_forwards]"
-                          style={{ animationDelay: `${idx * 30}ms` }}
-                        >
-                          <div className="flex gap-3 flex-row-reverse">
-                            <div className={`w-[72px] h-[72px] flex-shrink-0 relative transition-all duration-300 ${getEventStatus(event) === 'ended' ? 'opacity-30 grayscale' : ''}`}>
-                              <div className={`w-full h-full rounded-md bg-gradient-to-br ${getGradientForTitle(event.title)} flex items-center justify-center`}>
-                                <span className="text-white text-2xl font-bold">{getEventInitial(event.title)}</span>
-                              </div>
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <h3 className="text-[15px] font-semibold text-white leading-snug mb-1">{event.title}</h3>
-                              <div className="space-y-0.5">
-                                {event.startTime && (
-                                  <div className="flex items-center gap-2 text-[13px]">
-                                    {getEventStatus(event) === 'ended' ? (
-                                      <span className="text-white/40">Zu Ende</span>
-                                    ) : (
-                                      <>
-                                        <span className="text-white/50">{event.startTime}</span>
-                                        {getEventStatus(event) === 'live' && (
-                                          <>
-                                            <span className="text-white/20">•</span>
-                                            <span className="flex items-center gap-1.5 text-green-400 text-[11px]">
-                                              <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse"></span>
-                                              Findet gerade statt
-                                            </span>
-                                          </>
-                                        )}
-                                      </>
-                                    )}
-                                  </div>
-                                )}
-                                {event.venueName && cleanVenueName(event.venueName) && (
-                                  <div className="flex items-center gap-1.5 text-[13px] text-white/50">
-                                    <MapPin size={12} className="flex-shrink-0" />
-                                    <span className="truncate">{cleanVenueName(event.venueName)}</span>
-                                  </div>
-                                )}
-                              </div>
-                              <div className="flex items-center gap-2 mt-2">
-                                {event.ticketUrl && (
-                                  <a href={event.ticketUrl} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} className="inline-flex items-center px-3 py-1.5 bg-white/10 hover:bg-white/15 rounded-md text-xs text-white font-medium transition-all">Get Tickets</a>
-                                )}
-                              </div>
-                            </div>
-                          </div>
+                  return (
+                    <div key={date} className="mb-6 relative" data-date={date} id={`date-${date}`}>
+                      {/* Date Header with Timeline Dot */}
+                      <div
+                        className={`text-sm font-medium mb-3 relative flex items-center transition-colors ${
+                          showCollapse ? 'cursor-pointer group' : ''
+                        } ${
+                          allEnded ? 'text-white/30 hover:text-white/40' : 'text-white/50 hover:text-white/70'
+                        }`}
+                        onClick={showCollapse ? () => toggleDate(date) : undefined}
+                      >
+                        <div className={`absolute -left-[41px] w-5 h-5 rounded-full z-10 ${
+                          allEnded ? 'bg-white/50' : 'bg-white/90'
+                        }`}></div>
+                        {showCollapse && (
+                          <ChevronDown
+                            size={16}
+                            className={`mr-2 transition-transform duration-300 ${isCollapsed ? '-rotate-90' : ''}`}
+                          />
+                        )}
+                        <span className="whitespace-nowrap">{formatDateHeader(date)}</span>
+                      </div>
+
+                      {/* Events */}
+                      <div
+                        className={`${showCollapse ? 'transition-all duration-500 ease-in-out overflow-hidden' : ''} ${
+                          showCollapse && isCollapsed
+                            ? 'max-h-0 opacity-0'
+                            : showCollapse
+                            ? 'max-h-[10000px] opacity-100'
+                            : ''
+                        }`}
+                      >
+                        <div className="space-y-0">
+                          {events.map((event, idx) => (
+                            <EventCard
+                              key={event.id}
+                              event={event}
+                              variant="desktop"
+                              animationDelay={isCollapsed ? 0 : idx * 30}
+                              onClick={() => {
+                                setSelectedEvent(event);
+                                setShowDetailModal(true);
+                              }}
+                            />
+                          ))}
                         </div>
-                      ))}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
 
               {/* Mobile: Bordered Cards */}
@@ -832,72 +827,64 @@ export default function EventsPage() {
                 {/* Vertical timeline line */}
                 <div className="absolute left-0 top-0 bottom-0 w-[2px] border-l-[3px] border-dotted border-white/40" style={{ borderSpacing: '8px' }}></div>
 
-                {Array.from(groupEventsByDate(displayedEvents)).map(([date, events], groupIndex) => (
-                  <div key={date} className="relative mb-4" data-date={date} id={`date-${date}`}>
-                    {/* Date Header with Timeline Dot */}
-                    <div className="text-sm font-medium text-white/50 mb-2 relative flex items-center">
-                      <div className="absolute -left-[41px] w-5 h-5 rounded-full bg-white/90 z-10"></div>
-                      <span className="whitespace-nowrap">{formatDateHeader(date)}</span>
-                    </div>
+                {Array.from(groupEventsByDate(displayedEvents)).map(([date, events], groupIndex) => {
+                  const allEnded = events.every(event => getEventStatus(event) === 'ended');
+                  const isCollapsed = collapsedDates.has(date);
+                  const today = new Date().toISOString().split('T')[0];
+                  const isToday = date === today;
+                  const showCollapse = isToday && allEnded;
 
-                    {/* Events */}
-                    <div className="space-y-2">
-                      {events.map((event, idx) => (
-                        <div
-                          key={event.id}
-                          onClick={() => {
-                            setSelectedEvent(event);
-                            setShowDetailModal(true);
-                          }}
-                          className="bg-white/5 border border-white/20 rounded-xl px-4 py-3 cursor-pointer active:scale-[0.98] transition-all duration-150 opacity-0 animate-[fadeIn_0.3s_ease-out_forwards]"
-                          style={{ animationDelay: `${idx * 30}ms` }}
-                        >
-                          <div className="flex gap-3 flex-row-reverse">
-                            <div className={`w-10 h-10 flex-shrink-0 transition-all duration-300 ${getEventStatus(event) === 'ended' ? 'opacity-30 grayscale' : ''}`}>
-                              <div className={`w-full h-full rounded-lg bg-gradient-to-br ${getGradientForTitle(event.title)} flex items-center justify-center`}>
-                                <span className="text-white text-lg font-bold">{getEventInitial(event.title)}</span>
-                              </div>
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <h3 className="text-sm font-semibold text-white leading-tight mb-1">{event.title}</h3>
-                              <div className="space-y-0.5">
-                                {event.startTime && (
-                                  <div className="flex items-center gap-2 text-xs">
-                                    {getEventStatus(event) === 'ended' ? (
-                                      <span className="text-white/40">Zu Ende</span>
-                                    ) : (
-                                      <>
-                                        <span className="text-white/50">{event.startTime}</span>
-                                        {getEventStatus(event) === 'live' && (
-                                          <>
-                                            <span className="text-white/20">•</span>
-                                            <span className="flex items-center gap-1 text-green-400 text-[10px]">
-                                              <span className="w-1 h-1 rounded-full bg-green-400 animate-pulse"></span>
-                                              Live
-                                            </span>
-                                          </>
-                                        )}
-                                      </>
-                                    )}
-                                  </div>
-                                )}
-                                {event.venueName && cleanVenueName(event.venueName) && (
-                                  <div className="flex items-center gap-1 text-xs text-white/50">
-                                    <MapPin size={10} className="flex-shrink-0" />
-                                    <span className="truncate">{cleanVenueName(event.venueName)}</span>
-                                  </div>
-                                )}
-                              </div>
-                              {event.ticketUrl && (
-                                <a href={event.ticketUrl} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} className="inline-block mt-2 px-2.5 py-1 bg-white/10 rounded text-[11px] text-white font-medium">Tickets</a>
-                              )}
-                            </div>
-                          </div>
+                  return (
+                    <div key={date} className="relative mb-4" data-date={date} id={`date-${date}`}>
+                      {/* Date Header with Timeline Dot */}
+                      <div
+                        className={`text-sm font-medium mb-2 relative flex items-center transition-colors ${
+                          showCollapse ? 'cursor-pointer group' : ''
+                        } ${
+                          allEnded ? 'text-white/30 hover:text-white/40' : 'text-white/50 hover:text-white/70'
+                        }`}
+                        onClick={showCollapse ? () => toggleDate(date) : undefined}
+                      >
+                        <div className={`absolute -left-[41px] w-5 h-5 rounded-full z-10 ${
+                          allEnded ? 'bg-white/50' : 'bg-white/90'
+                        }`}></div>
+                        {showCollapse && (
+                          <ChevronDown
+                            size={14}
+                            className={`mr-2 transition-transform duration-300 ${isCollapsed ? '-rotate-90' : ''}`}
+                          />
+                        )}
+                        <span className="whitespace-nowrap">{formatDateHeader(date)}</span>
+                      </div>
+
+                      {/* Events with Smooth Collapse */}
+                      <div
+                        className={`${showCollapse ? 'transition-all duration-500 ease-in-out overflow-hidden' : ''} ${
+                          showCollapse && isCollapsed
+                            ? 'max-h-0 opacity-0'
+                            : showCollapse
+                            ? 'max-h-[10000px] opacity-100'
+                            : ''
+                        }`}
+                      >
+                        <div className="space-y-2">
+                          {events.map((event, idx) => (
+                            <EventCard
+                              key={event.id}
+                              event={event}
+                              variant="mobile"
+                              animationDelay={isCollapsed ? 0 : idx * 30}
+                              onClick={() => {
+                                setSelectedEvent(event);
+                                setShowDetailModal(true);
+                              }}
+                            />
+                          ))}
                         </div>
-                      ))}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </>
           )}
@@ -1036,15 +1023,17 @@ export default function EventsPage() {
 
                 {/* Action Buttons */}
                 <div className="pt-3 flex gap-2">
-                  <a
-                    href={selectedEvent.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-[13px] text-white/70 hover:text-white transition-all hover:bg-white/5"
-                  >
-                    <span>Zum Veranstalter</span>
-                    <ArrowUpRight size={12} />
-                  </a>
+                  {(selectedEvent.organizerWebsite || selectedEvent.url) && (
+                    <a
+                      href={selectedEvent.organizerWebsite || selectedEvent.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-[13px] text-white/70 hover:text-white transition-all hover:bg-white/5"
+                    >
+                      <span>{selectedEvent.organizerWebsite ? 'Zur Veranstalter-Website' : 'Zur Event-Seite'}</span>
+                      <ArrowUpRight size={12} />
+                    </a>
+                  )}
                   <button
                     onClick={() => {
                       // Create calendar event

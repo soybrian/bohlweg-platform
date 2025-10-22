@@ -86,14 +86,17 @@ JSON-Struktur:
       "website": string (wenn verfügbar - vollständige URL)
     },
     "category": string (Event-Kategorie),
-    "mood_category": string (EINE der folgenden Kategorien basierend auf der Event-Beschreibung):
-      - "Das crazy" (für skurrile, außergewöhnliche, verrückte Events - z.B. experimentelle Kunst, ungewöhnliche Performances)
-      - "Lustig" (für Comedy, humorvolle Shows, unterhaltsame Events die zum Lachen bringen)
-      - "Interessant" (für kulturell/intellektuell anspruchsvolle Events - Ausstellungen, Vorträge, klassische Konzerte)
-      - "Kann man sich geben" (für solide, angenehme Events ohne besondere Highlights - Standard-Veranstaltungen),
-    "price_info": string (Preis-Information),
+    "price_info": string (Original-Preis-Information wie sie auf der Seite steht),
+    "price_formatted": string (WICHTIG: Extrahiere den günstigsten NICHT-ERMÄSSIGTEN Preis als reine Zahl mit € - Beispiele:
+      - "Erwachsene 7€ | ermäßigt 5€ | Kinder 4€" → "7€"
+      - "10,50€ - 14,50€" → "10,50€"
+      - "Regulär: 12,- Euro" → "12€"
+      - "ab 15 EUR" → "15€"
+      - "Kostenlos" → null
+      Ignoriere ermäßigte Preise, Kinderpreise, Seniorenpreise. Extrahiere nur den regulären Erwachsenenpreis als Zahl + €),
     "is_free": boolean (true wenn kostenlos),
     "ticket_url": string (vollständige URL zum Ticket-Kauf wenn vorhanden - z.B. Links die "Tickets kaufen" oder "Jetzt buchen" heißen),
+    "organizer_website": string (vollständige URL zur Veranstalter-Homepage - suche SPEZIELL nach Links mit Text "Webseite der Veranstaltung", "Website der Veranstaltung", oder ähnlich),
     "image_urls": [string] (alle vollständigen Bild-URLs)
   }
 }
@@ -103,8 +106,8 @@ KRITISCH WICHTIG:
 - NIEMALS erfundene/Platzhalter-Daten verwenden
 - Wenn ein Feld nicht vorhanden: setze auf null oder ""
 - Textinhalte VOLLSTÄNDIG übernehmen
-- Suche nach Links wie "Tickets kaufen", "Jetzt buchen", oder ähnlichen Begriffen für ticket_url
-- Wähle die mood_category basierend auf Ton, Inhalt und Zielgruppe des Events
+- Für organizer_website: Suche SPEZIELL nach "Webseite der Veranstaltung" oder "Website der Veranstaltung" Links - dies ist die Homepage des Veranstalters
+- Für ticket_url: Suche nach "Tickets kaufen", "Jetzt buchen" oder ähnlichen Ticket-Kauf-Links
 - Antworte NUR mit gültigem JSON`
         },
         {

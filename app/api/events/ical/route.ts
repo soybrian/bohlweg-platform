@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { getDatabase } from "@/lib/db";
 import type { EventItem } from "@/lib/db/schema";
 
@@ -6,20 +6,57 @@ import type { EventItem } from "@/lib/db/schema";
  * iCal/ICS Feed für Event-Synchronisation mit Kalender-Apps
  * Kompatibel mit iPhone, Android, Google Calendar, Outlook etc.
  */
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
     const db = getDatabase();
+    const searchParams = request.nextUrl.searchParams;
 
-    // Hole alle aktiven Events mit vollständigen Daten
-    const events = db.prepare(`
+    // Filter-Parameter
+    const afterWork = searchParams.get("afterWork") === "true";
+    const weekend = searchParams.get("weekend") === "true";
+    const free = searchParams.get("free") === "true";
+
+    // Baue dynamische Query mit Filtern
+    let query = `
       SELECT * FROM events
       WHERE status = 'active'
       AND startDate IS NOT NULL
-      ORDER BY startDate ASC, startTime ASC
-    `).all() as EventItem[];
+      AND startDate >= date('now', 'localtime')
+    `;
+    const params: any[] = [];
+
+    // Filter: After Work (events starting at 15:00 or later, OR currently running and ending after 15:00)
+    if (afterWork) {
+      query += ` AND (startTime >= '15:00' OR (endTime IS NOT NULL AND endTime >= '15:00'))`;
+    }
+
+    // Filter: Weekend (Saturday=6 or Sunday=0)
+    if (weekend) {
+      query += ` AND (strftime('%w', startDate) = '0' OR strftime('%w', startDate) = '6')`;
+    }
+
+    // Filter: Free events
+    if (free) {
+      query += ` AND isFree = 1`;
+    }
+
+    query += ` ORDER BY startDate ASC, startTime ASC`;
+
+    const events = db.prepare(query).all(...params) as EventItem[];
+
+    // Baue dynamischen Kalender-Namen basierend auf Filtern
+    let calendarName = 'Bohlweg Events - Braunschweig';
+    const filterLabels: string[] = [];
+    if (afterWork) filterLabels.push('After Work');
+    if (weekend) filterLabels.push('Weekend');
+    if (free) filterLabels.push('Kostenlos');
+
+    if (filterLabels.length > 0) {
+      calendarName += ` (${filterLabels.join(', ')})`;
+    }
 
     // Generiere iCal-Format
-    const icalContent = generateICalFeed(events);
+    const icalContent = generateICalFeed(events, calendarName);
 
     return new NextResponse(icalContent, {
       headers: {
@@ -40,7 +77,7 @@ export async function GET() {
 /**
  * Generiere iCal-Feed im ICS-Format
  */
-function generateICalFeed(events: EventItem[]): string {
+function generateICalFeed(events: EventItem[], calendarName: string = 'Bohlweg Events - Braunschweig'): string {
   const lines: string[] = [];
 
   // iCal Header
@@ -49,7 +86,7 @@ function generateICalFeed(events: EventItem[]): string {
   lines.push('PRODID:-//Bohlweg Platform//Events Calendar//DE');
   lines.push('CALSCALE:GREGORIAN');
   lines.push('METHOD:PUBLISH');
-  lines.push('X-WR-CALNAME:Bohlweg Events - Braunschweig');
+  lines.push(`X-WR-CALNAME:${calendarName}`);
   lines.push('X-WR-CALDESC:Veranstaltungen aus Braunschweig');
   lines.push('X-WR-TIMEZONE:Europe/Berlin');
 

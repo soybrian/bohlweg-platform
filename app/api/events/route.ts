@@ -10,12 +10,15 @@ export async function GET(request: NextRequest) {
     const venue = searchParams.get("venue") || "";
     const startDate = searchParams.get("startDate") || "";
     const endDate = searchParams.get("endDate") || "";
+    const afterWork = searchParams.get("afterWork") === "true";
+    const weekend = searchParams.get("weekend") === "true";
+    const free = searchParams.get("free") === "true";
     const limit = parseInt(searchParams.get("limit") || "50");
     const offset = parseInt(searchParams.get("offset") || "0");
 
     const db = getDatabase();
 
-  let query = `SELECT * FROM events WHERE startDate IS NOT NULL AND startDate >= date('now')`;
+  let query = `SELECT * FROM events WHERE startDate IS NOT NULL AND startDate >= date('now', 'localtime')`;
   const params: any[] = [];
 
   if (search) {
@@ -44,23 +47,39 @@ export async function GET(request: NextRequest) {
     params.push(endDate);
   }
 
+  // Filter: After Work (events starting at 15:00 or later, OR currently running and ending after 15:00)
+  if (afterWork) {
+    query += ` AND (startTime >= '15:00' OR (endTime IS NOT NULL AND endTime >= '15:00'))`;
+  }
+
+  // Filter: Weekend (Saturday=6 or Sunday=0)
+  if (weekend) {
+    query += ` AND (strftime('%w', startDate) = '0' OR strftime('%w', startDate) = '6')`;
+  }
+
+  // Filter: Free events
+  if (free) {
+    query += ` AND isFree = 1`;
+  }
+
   // Sortiere nach Datum aufsteigend (nächste Events zuerst)
   query += ` ORDER BY startDate ASC, startTime ASC LIMIT ? OFFSET ?`;
   params.push(limit, offset);
 
   const events = db.prepare(query).all(...params);
 
-  // Add dates_count to each event
+  // Add dates_count to each event and convert isFree to boolean
   const eventsWithDatesCount = events.map((event: any) => {
     const datesCount = db.prepare('SELECT COUNT(*) as count FROM event_dates WHERE event_id = ?').get(event.id) as { count: number };
     return {
       ...event,
+      isFree: Boolean(event.isFree),
       dates_count: datesCount.count
     };
   });
 
   // Count total
-  let countQuery = `SELECT COUNT(*) as total FROM events WHERE startDate IS NOT NULL AND startDate >= date('now')`;
+  let countQuery = `SELECT COUNT(*) as total FROM events WHERE startDate IS NOT NULL AND startDate >= date('now', 'localtime')`;
   const countParams: any[] = [];
 
   if (search) {
@@ -87,6 +106,21 @@ export async function GET(request: NextRequest) {
   if (endDate) {
     countQuery += ` AND startDate <= ?`;
     countParams.push(endDate);
+  }
+
+  // Filter: After Work
+  if (afterWork) {
+    countQuery += ` AND (startTime >= '15:00' OR (endTime IS NOT NULL AND endTime >= '15:00'))`;
+  }
+
+  // Filter: Weekend
+  if (weekend) {
+    countQuery += ` AND (strftime('%w', startDate) = '0' OR strftime('%w', startDate) = '6')`;
+  }
+
+  // Filter: Free events
+  if (free) {
+    countQuery += ` AND isFree = 1`;
   }
 
   const { total } = db.prepare(countQuery).get(...countParams) as { total: number };
